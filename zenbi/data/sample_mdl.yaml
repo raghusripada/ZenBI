@@ -1,0 +1,75 @@
+models:
+  - name: users
+    actual_table: actual_users_table
+    description: "User information"
+    columns:
+      - name: user_id # Semantic name
+        actual_name: id # Database column name
+        dtype: INTEGER
+        properties:
+          displayName: "User ID"
+        description: "Unique identifier for the user"
+      - name: email # Semantic name
+        actual_name: email_address # Database column name
+        dtype: TEXT
+        description: "User's primary email"
+      - name: name # Semantic name
+        actual_name: full_name # Database column name
+        dtype: TEXT
+        description: "User's full name"
+      - name: city # Semantic name
+        actual_name: city_name # Database column name
+        dtype: TEXT
+        description: "City where the user resides"
+    primary_key: user_id
+
+  - name: orders
+    actual_table: actual_orders_table
+    description: "Customer orders"
+    columns:
+      - name: order_id # Semantic name
+        actual_name: order_ref # Database column name
+        dtype: INTEGER
+        properties:
+          displayName: "Order ID"
+        description: "Unique identifier for the order"
+      - name: user_id # Semantic name (FK to users model)
+        actual_name: customer_id # Database column name
+        dtype: INTEGER
+        description: "Identifier of the user who placed the order"
+      - name: order_date # Semantic name
+        actual_name: date_of_order # Database column name
+        dtype: TIMESTAMP
+        description: "Date and time when the order was placed"
+      - name: total_price # Semantic name
+        actual_name: order_total_amount # Database column name
+        dtype: FLOAT
+        description: "Total amount of the order in USD"
+      - name: price_eur # Semantic name
+        actual_name: order_amount_eur # Database column name
+        dtype: FLOAT
+        description: "Total amount of the order in EUR"
+      - name: item_count # Semantic name
+        actual_name: number_of_items # Database column name
+        dtype: INTEGER
+        description: "Number of items in the order"
+      - name: vat_amount # Calculated column
+        actual_name: vat_calculated # Not strictly needed as it's an expression, but can be for alias hint
+        dtype: FLOAT
+        expression: "total_price * 0.20" # Uses semantic name 'total_price'
+        description: "Calculated VAT amount (20% of total_price)"
+      - name: total_price_plus_vat # Calculated column
+        actual_name: total_with_vat # Not strictly needed
+        dtype: FLOAT
+        expression: "total_price * 1.20" # Uses semantic name 'total_price'
+        description: "Total price including 20% VAT"
+    primary_key: order_id
+
+relationships:
+  - name: user_orders
+    from_model: users
+    to_model: orders
+    from_columns: [user_id] # Semantic column name in users model
+    to_columns: [user_id] # Semantic column name in orders model (maps to customer_id in DB)
+    type: ONE_TO_MANY
+    description: "Links users to their orders"
