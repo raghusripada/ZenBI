@@ -1,5 +1,5 @@
 import React, { useState, FormEvent } from 'react';
-import QueryResultChart from './components/QueryResultChart'; // Import the chart component
+import QueryResultChart from './components/QueryResultChart';
 import './App.css';
 
 interface QueryResult {
@@ -13,19 +13,21 @@ interface ChartSuggestion {
   title?: string;
 }
 
-interface ApiResponse {
+// Updated ApiResponse interface to include textual_insight
+interface ApiResponseData { // Renamed from ApiResponse to avoid conflict with global Response type
   natural_language_query: string;
   zensql_query?: string | null;
   final_sql_query?: string | null;
   mdl_context_used?: string | null;
   query_results?: QueryResult[] | null;
-  chart_suggestion?: ChartSuggestion | null; // Added chart_suggestion
+  chart_suggestion?: ChartSuggestion | null;
+  textual_insight?: string | null; // New field for textual insight
   error_message?: string | null;
 }
 
 function App() {
   const [nlQuery, setNlQuery] = useState<string>('');
-  const [apiResponse, setApiResponse] = useState<ApiResponse | null>(null);
+  const [apiResponse, setApiResponse] = useState<ApiResponseData | null>(null); // Use ApiResponseData
   const [errorMsg, setErrorMsg] = useState<string>('');
   const [isLoading, setIsLoading] = useState<boolean>(false);
 
@@ -47,7 +49,7 @@ function App() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ natural_language_query: nlQuery }),
       });
-      const data: ApiResponse = await response.json();
+      const data: ApiResponseData = await response.json(); // Use ApiResponseData
       if (!response.ok) {
         setErrorMsg(data.error_message || data.detail || `Error ${response.status}: ${response.statusText}`);
         setApiResponse(data);
@@ -66,6 +68,7 @@ function App() {
   };
 
   const setupSampleDb = async () => {
+    // ... (setupSampleDb function remains the same) ...
     setIsLoading(true);
     setErrorMsg('');
     setApiResponse(null);
@@ -118,12 +121,28 @@ function App() {
 
         {apiResponse && (
           <div className="results-display">
-            <div className="query-details-grid">
-              <div className="result-section nlq-section">
-                <h3>Natural Language Query:</h3>
-                <pre>{apiResponse.natural_language_query}</pre>
-              </div>
+            <div className="result-section nlq-section">
+              <h3>Natural Language Query:</h3>
+              <pre>{apiResponse.natural_language_query}</pre>
+            </div>
 
+            {/* Textual Insight Section - Placed near the top for quick summary */}
+            {apiResponse.textual_insight && apiResponse.textual_insight.trim() !== "" && !apiResponse.error_message && (
+              <div className="result-section insight-section">
+                <h3>Textual Insight</h3>
+                <pre className="insight-text">{apiResponse.textual_insight}</pre>
+              </div>
+            )}
+            {/* Render insight even with error if insight exists and might explain the error, or if error is specific to insight itself */}
+            {apiResponse.textual_insight && apiResponse.textual_insight.trim() !== "" && apiResponse.error_message && apiResponse.textual_insight.toLowerCase().includes("error generating textual insight") && (
+              <div className="result-section insight-section insight-error">
+                <h3>Textual Insight Status</h3>
+                <pre className="insight-text">{apiResponse.textual_insight}</pre>
+              </div>
+            )}
+
+
+            <div className="query-details-grid">
               {apiResponse.zensql_query && (
                 <div className="result-section zensql-section">
                   <h3>Generated ZenSQL:</h3>
@@ -186,7 +205,6 @@ function App() {
                     )}
                  </div>
             )}
-
 
             {apiResponse.mdl_context_used && (
               <div className="result-section context-section">

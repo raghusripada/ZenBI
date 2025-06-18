@@ -4,7 +4,7 @@ from typing import Optional, List, Dict
 import json
 import yaml
 import re
-import logging # Added logging
+import logging
 
 from zenbi.mdl.loader import load_semantic_layer_from_data_dir, generate_mdl_from_openmetadata
 from zenbi.mdl.models import SemanticLayer, ColumnDefinition, CalculatedColumnDefinition
@@ -16,13 +16,11 @@ from zenbi.core.openmetadata_service import OpenMetadataService
 from sqlalchemy.exc import SQLAlchemyError
 from pathlib import Path
 
-# Setup basic logging for the API module
-logger = logging.getLogger(__name__) # Changed from __name__ to "zenbi.api" for clarity if desired
+logger = logging.getLogger(__name__)
 logging.basicConfig(level=logging.INFO)
 
 
 # --- Pydantic Models for API requests/responses ---
-# ... (Pydantic models remain the same) ...
 class ZenSQLQueryRequest(BaseModel):
     natural_language_query: str
 
@@ -33,8 +31,10 @@ class ZenSQLQueryResponse(BaseModel):
     mdl_context_used: Optional[str] = None
     query_results: Optional[List[Dict]] = None
     chart_suggestion: Optional[Dict] = None
+    textual_insight: Optional[str] = None # New field for textual insight
     error_message: Optional[str] = None
 
+# ... (other Pydantic models remain the same) ...
 class TranspileRequest(BaseModel):
     zensql_query: str
     target_dialect: Optional[str] = "sqlite"
@@ -69,20 +69,17 @@ app = FastAPI(
 )
 
 # --- Global Services ---
+# ... (get_app_settings, llm_service, db_service, _semantic_layer_cache, get_semantic_layer, parse_llm_output_for_chart_and_sql remain the same) ...
 def get_app_settings() -> Settings:
-    # This ensures that 'settings' is accessed after it's been initialized
-    # and potentially validated by Pydantic during startup.
     return settings
 
 llm_service: Optional[LLMQueryService] = None
 try:
-    # Initialize LLM Service using the global 'settings' instance
-    # The __init__ of LLMQueryService now handles provider selection and specific config checks.
     llm_service = LLMQueryService(settings=settings)
 except ValueError as e:
     logger.error(f"Failed to initialize LLMQueryService during application startup: {e}")
-    llm_service = None # Explicitly set to None, app can start, but LLM-dependent endpoints will fail
-except Exception as e: # Catch any other unexpected errors during LLM service init
+    llm_service = None
+except Exception as e:
     logger.error(f"An unexpected error occurred during LLMQueryService initialization: {e}")
     llm_service = None
 
@@ -90,7 +87,6 @@ db_service = DatabaseService()
 
 _semantic_layer_cache: Optional[SemanticLayer] = None
 
-# ... (get_semantic_layer and parse_llm_output_for_chart_and_sql remain the same) ...
 def get_semantic_layer(force_reload: bool = False, file_name: str = "sample_mdl.yaml") -> SemanticLayer:
     global _semantic_layer_cache
     if force_reload or (_semantic_layer_cache and file_name != getattr(_semantic_layer_cache, "_source_file", "sample_mdl.yaml")):
@@ -123,15 +119,14 @@ def parse_llm_output_for_chart_and_sql(raw_output: str) -> (Optional[Dict], str)
             logger.error(f"Chart JSON parsing error: {e}. JSON: {json_str}"); chart_suggestion = {"error": "Failed to parse chart JSON"}
         sql_query = raw_output[match.end():].strip()
     return chart_suggestion, sql_query
-
 # --- API Endpoints ---
 @app.get("/", tags=["General"])
 async def root(): return {"message": "Welcome to ZenBI"}
 
+# ... (other admin and utility endpoints remain the same) ...
 @app.post("/admin/import-from-openmetadata", response_model=OpenMetadataImportResponse, tags=["Admin", "OpenMetadata"])
 async def import_from_openmetadata_endpoint(request: OpenMetadataImportRequest, app_settings: Settings = Depends(get_app_settings)):
     if not app_settings.OM_SERVER_URL:
-        # Use HTTPException for client errors like misconfiguration that's expected to be checked
         raise HTTPException(status_code=400, detail="OpenMetadata integration is not configured (OM_SERVER_URL is not set).")
     om_service: Optional[OpenMetadataService] = None
     try:
@@ -156,7 +151,6 @@ async def import_from_openmetadata_endpoint(request: OpenMetadataImportRequest, 
         return OpenMetadataImportResponse(message="Import successful.", file_path=str(file_path.relative_to(Path.cwd())), mdl_content_summary={"models_count": len(semantic_layer.models)})
     except Exception as e:
         logger.error(f"Error during OpenMetadata import process: {e}")
-        # Return a 500 for unexpected errors during the import logic itself
         raise HTTPException(status_code=500, detail=f"Error during import from OpenMetadata: {e}")
 
 
@@ -174,7 +168,6 @@ async def setup_sample_db_endpoint():
 
 @app.get("/mdl/load-sample", response_model=SemanticLayer, tags=["MDL"])
 async def load_sample_mdl_endpoint(file_name: Optional[str] = "sample_mdl.yaml"):
-    # get_semantic_layer already raises HTTPException if file not found
     return get_semantic_layer(file_name=file_name)
 
 
@@ -182,7 +175,7 @@ async def load_sample_mdl_endpoint(file_name: Optional[str] = "sample_mdl.yaml")
 async def generate_zensql_endpoint(request_body: ZenSQLQueryRequest = Body(...), mdl_file_name: Optional[str] = "sample_mdl.yaml"):
     mdl_context = ""; zensql_query = ""; chart_suggestion = None; error_msg = None
     try:
-        if not llm_service: raise HTTPException(status_code=503, detail="LLM Service is not available due to configuration errors.")
+        if not llm_service: raise HTTPException(status_code=503, detail="LLM Service unavailable.")
         semantic_layer = get_semantic_layer(file_name=mdl_file_name)
         mdl_context = serialize_mdl_for_llm(semantic_layer)
         raw_llm_output = llm_service.generate_zensql(semantic_layer, request_body.natural_language_query)
@@ -190,8 +183,7 @@ async def generate_zensql_endpoint(request_body: ZenSQLQueryRequest = Body(...),
         if not zensql_query and not (chart_suggestion and chart_suggestion.get("error")):
             error_msg = "LLM did not return a valid SQL query."
             if raw_llm_output and raw_llm_output.strip().startswith("-- Error"): error_msg = raw_llm_output.strip()
-            # This is an LLM content error, not necessarily a server error, so return 200 with error message
-    except HTTPException: raise # Re-raise HTTP exceptions from get_semantic_layer or LLM service check
+    except HTTPException: raise
     except Exception as e:
         logger.error(f"Error in generate_zensql_endpoint: {e}")
         error_msg = str(e)
@@ -203,7 +195,6 @@ async def generate_zensql_endpoint(request_body: ZenSQLQueryRequest = Body(...),
         chart_suggestion=chart_suggestion,
         error_message=error_msg
     )
-
 
 @app.post("/query/transpile-zensql", response_model=TranspileResponse, tags=["Query"])
 async def transpile_zensql_endpoint(request_body: TranspileRequest = Body(...), mdl_file_name: Optional[str] = "sample_mdl.yaml"):
@@ -219,52 +210,90 @@ async def transpile_zensql_endpoint(request_body: TranspileRequest = Body(...), 
         logger.error(f"Unexpected transpilation error: {e}")
         raise HTTPException(status_code=500, detail="Unexpected error during SQL transpilation.")
 
-
 @app.post("/query/execute-natural-language", response_model=ZenSQLQueryResponse, tags=["Query"])
 async def execute_natural_language_query(request: ZenSQLQueryRequest = Body(...), mdl_file_name: Optional[str] = "sample_mdl.yaml"):
     response_data = ZenSQLQueryResponse(natural_language_query=request.natural_language_query)
+
     try:
-        if not llm_service: raise HTTPException(status_code=503, detail="LLM Service is not available due to configuration errors.")
+        if not llm_service:
+            raise HTTPException(status_code=503, detail="LLM Service is not available due to configuration errors.")
 
         semantic_layer = get_semantic_layer(file_name=mdl_file_name)
         response_data.mdl_context_used = serialize_mdl_for_llm(semantic_layer)
 
+        # Step 1: Generate ZenSQL and Chart Suggestion
         try:
             raw_llm_output = llm_service.generate_zensql(semantic_layer, request.natural_language_query)
             response_data.chart_suggestion, response_data.zensql_query = parse_llm_output_for_chart_and_sql(raw_llm_output)
+
             if not response_data.zensql_query and not (response_data.chart_suggestion and response_data.chart_suggestion.get("error")):
                 err_msg = "LLM did not return a valid SQL query."
-                if raw_llm_output and raw_llm_output.strip().startswith("-- Error"): err_msg = raw_llm_output.strip()
-                raise ValueError(err_msg)
+                if raw_llm_output and raw_llm_output.strip().startswith("-- Error"): # Check if LLM itself returned an error string
+                    err_msg = raw_llm_output.strip()
+                raise ValueError(err_msg) # Raise to be caught by the outer try-except for this stage
         except Exception as e:
             logger.error(f"LLM Query Generation Error: {e}")
             response_data.error_message = f"LLM Query Generation Error: {str(e)}"
-            return response_data
+            return response_data # Return immediately
 
+        # Step 2: Transpile ZenSQL to SQL
         try:
-            semantic_engine = SemanticEngine(semantic_layer, target_dialect="sqlite")
+            semantic_engine = SemanticEngine(semantic_layer, target_dialect="sqlite") # Assuming SQLite for execution
             response_data.final_sql_query = semantic_engine.transpile_zensql_to_sql(response_data.zensql_query)
         except Exception as e:
             logger.error(f"SQL Transpilation Error: {e}")
             response_data.error_message = f"SQL Transpilation Error: {str(e)}"
-            return response_data
+            return response_data # Return with error
 
+        # Step 3: Execute SQL Query
         try:
             response_data.query_results = db_service.execute_query(response_data.final_sql_query)
         except SQLAlchemyError as e:
             logger.error(f"Database Execution Error: {e}")
             response_data.error_message = f"Database Execution Error: {str(e)}"
+            # Results will be None, error_message is set. Proceed to insight generation if desired, or return.
+            # For now, let's allow insight generation attempt even if DB fails, it might summarize the problem.
         except Exception as e:
             logger.error(f"Unexpected Database Error: {e}")
             response_data.error_message = f"Unexpected Database Error: {str(e)}"
 
+        # Step 4: Generate Textual Insight (only if no prior critical error preventing it)
+        # Attempt insight generation even if DB query had an error, as insight might explain the error or lack of data.
+        if llm_service and response_data.final_sql_query : # Requires at least the SQL to be generated
+            try:
+                # Use an empty list for results if query_results is None (e.g., due to DB error)
+                # to allow insight generation about the situation.
+                results_for_insight = response_data.query_results if response_data.query_results is not None else []
+
+                response_data.textual_insight = llm_service.generate_textual_insight(
+                    natural_language_query=request.natural_language_query,
+                    final_sql_query=response_data.final_sql_query, # Use the successfully transpiled SQL
+                    query_results=results_for_insight
+                )
+            except Exception as e:
+                logger.error(f"Error generating textual insight: {e}")
+                # Append to existing error message if any, or set new one
+                insight_error = f"Error generating textual insight: {str(e)}"
+                if response_data.error_message:
+                    response_data.error_message += f"; {insight_error}"
+                else:
+                    response_data.error_message = insight_error
+        else:
+            if not response_data.error_message: # If no other error, but insight couldn't be generated
+                 response_data.textual_insight = "Textual insight could not be generated due to missing SQL or LLM service unavailability."
+
+
     except HTTPException as e_http:
-        # This will catch HTTPExceptions from get_semantic_layer or the LLM service check
-        # and return them directly as FastAPI knows how to handle these.
-        # No need to set response_data.error_message if we re-raise.
-        raise e_http
+        # This will catch HTTPExceptions from get_semantic_layer or the initial LLM service check
+        # Update response_data with this error before returning
+        response_data.error_message = e_http.detail
+        # We don't re-raise here, instead let the function return the response_data
+        # which now includes the error message.
     except Exception as e_global:
         logger.error(f"Global Error in execute_natural_language: {e_global}")
-        response_data.error_message = f"An unexpected error occurred: {str(e_global)}"
+        if response_data.error_message: # Append if an error was already caught from a sub-step
+            response_data.error_message += f"; Global error: {str(e_global)}"
+        else:
+            response_data.error_message = f"An unexpected error occurred: {str(e_global)}"
 
     return response_data
