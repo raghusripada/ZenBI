@@ -1,16 +1,18 @@
 from langchain_openai import ChatOpenAI
+from langchain_community.chat_models.ollama import ChatOllama # Import ChatOllama
 from langchain.prompts import ChatPromptTemplate
 from langchain.schema.output_parser import StrOutputParser
 from zenbi.mdl.models import SemanticLayer, ModelDefinition, ColumnDefinition, CalculatedColumnDefinition, RelationshipDefinition
 from zenbi.core.config import Settings
+import logging # For logging information
+
+# Setup basic logging
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
 
 def serialize_mdl_for_llm(semantic_layer: SemanticLayer) -> str:
-    """
-    Converts the relevant parts of the SemanticLayer into a string format
-    suitable for an LLM prompt.
-    """
+    # ... (existing serialize_mdl_for_llm function - no changes) ...
     output_lines = []
-
     output_lines.append("Models:")
     for model in semantic_layer.models:
         output_lines.append(f"  Model: {model.name} (Actual Table: {model.actual_table})")
@@ -18,22 +20,18 @@ def serialize_mdl_for_llm(semantic_layer: SemanticLayer) -> str:
             output_lines.append(f"    Description: {model.description}")
         if model.primary_key:
             output_lines.append(f"    Primary Key: {model.primary_key} (Semantic name of the primary key column)")
-
         output_lines.append("    Columns:")
         for col in model.columns:
             col_type = "Column"
             expression_str = ""
             if isinstance(col, CalculatedColumnDefinition):
                 col_type = "Calculated Column"
-                # Ensure expression is part of the description for the LLM to understand its calculation
                 expression_str = f", Expression: \"{col.expression}\""
-
             output_lines.append(f"      - {col_type}: {col.name} (Actual Name in DB: {col.actual_name}, Data Type: {col.dtype}{expression_str})")
             if col.description:
                 output_lines.append(f"        Description: {col.description}")
-            if col.properties: # e.g. displayName
+            if col.properties:
                 output_lines.append(f"        Properties: {col.properties}")
-
     if semantic_layer.relationships:
         output_lines.append("\nRelationships:")
         for rel in semantic_layer.relationships:
@@ -43,27 +41,58 @@ def serialize_mdl_for_llm(semantic_layer: SemanticLayer) -> str:
             output_lines.append(f"    To Model: {rel.to_model} (using columns: {', '.join(rel.to_columns)})")
     else:
         output_lines.append("\nNo relationships defined.")
-
     return "\n".join(output_lines)
 
 
 class LLMQueryService:
     def __init__(self, settings: Settings):
-        if not settings.OPENAI_API_KEY or settings.OPENAI_API_KEY == "your_openai_api_key_here":
-            raise ValueError("OPENAI_API_KEY is not configured correctly. Please set it in your .env file or environment variables.")
-
         self.settings = settings
-        self.llm = ChatOpenAI(
-            openai_api_key=self.settings.OPENAI_API_KEY,
-            model_name="gpt-3.5-turbo" # Default model, can be configured
-            # Consider adding temperature=0 for more deterministic SQL and JSON output
-        )
+        self.llm = None # Initialize llm attribute
+
+        provider = self.settings.LLM_PROVIDER.lower()
+        logger.info(f"Initializing LLM service with provider: {provider}")
+
+        if provider == "ollama":
+            if not self.settings.OLLAMA_BASE_URL:
+                raise ValueError("OLLAMA_BASE_URL must be configured when LLM_PROVIDER is 'ollama'.")
+            try:
+                self.llm = ChatOllama(
+                    model=self.settings.OLLAMA_MODEL_ZENSQL, # Using ZenSQL model for the main LLM instance
+                    base_url=str(self.settings.OLLAMA_BASE_URL), # Convert HttpUrl to string
+                    temperature=0 # For more deterministic output
+                )
+                # Note: For chart suggestions, if OLLAMA_MODEL_CHART is different,
+                # a separate instance or logic to switch model per call might be needed.
+                # For now, the same LLM instance is used for the combined prompt.
+                logger.info(f"Using Ollama LLM service. ZenSQL/Chart Model: {self.settings.OLLAMA_MODEL_ZENSQL}, URL: {self.settings.OLLAMA_BASE_URL}")
+            except Exception as e:
+                logger.error(f"Failed to initialize Ollama client: {e}")
+                raise ValueError(f"Ollama client initialization failed: {e}") from e
+
+        elif provider == "openai":
+            if not self.settings.OPENAI_API_KEY or self.settings.OPENAI_API_KEY == "your_openai_api_key_here":
+                raise ValueError("OPENAI_API_KEY is not configured correctly for 'openai' provider.")
+            try:
+                self.llm = ChatOpenAI(
+                    openai_api_key=self.settings.OPENAI_API_KEY,
+                    model_name=self.settings.OPENAI_MODEL_NAME, # Using the configured OpenAI model
+                    temperature=0 # For more deterministic output
+                )
+                logger.info(f"Using OpenAI LLM service. Model: {self.settings.OPENAI_MODEL_NAME}")
+            except Exception as e:
+                logger.error(f"Failed to initialize OpenAI client: {e}")
+                raise ValueError(f"OpenAI client initialization failed: {e}") from e
+        else:
+            raise ValueError(f"Unsupported LLM_PROVIDER: '{self.settings.LLM_PROVIDER}'. Choose 'openai' or 'ollama'.")
 
     def generate_zensql(self, semantic_layer: SemanticLayer, user_query: str) -> str:
         """
-        Generates ZenSQL and optionally a chart suggestion.
+        Generates ZenSQL and optionally a chart suggestion using the configured LLM.
         Returns a raw string that may contain both the SQL and the chart suggestion block.
         """
+        if self.llm is None: # Should not happen if __init__ succeeded
+            raise RuntimeError("LLM client is not initialized.")
+
         mdl_context = serialize_mdl_for_llm(semantic_layer)
 
         prompt_template_str = """
@@ -116,20 +145,18 @@ SELECT user_id, email, name, city FROM users
 
 Final SQL Query:
 """
-        # Note: "Final SQL Query:" is part of the prompt to guide the LLM, it's not a stop sequence here.
-        # The actual SQL will be parsed out after the chart suggestion block.
-
         prompt_template = ChatPromptTemplate.from_template(prompt_template_str)
 
+        # The chain uses the initialized self.llm (either ChatOpenAI or ChatOllama)
         chain = prompt_template | self.llm | StrOutputParser()
 
         try:
-            # This raw_output may contain both the chart suggestion block and the SQL query
             raw_output = chain.invoke({
                 "mdl_context": mdl_context,
                 "user_question": user_query
             })
             return raw_output
         except Exception as e:
-            print(f"Error during LLM query generation: {e}")
-            return f"-- Error generating ZenSQL and chart suggestion: {e}"
+            logger.error(f"Error during LLM invoke call with provider {self.settings.LLM_PROVIDER}: {e}")
+            # Return a formatted error string that can be picked up by parsing logic if needed
+            return f"-- Error generating ZenSQL and chart suggestion: LLM call failed with {self.settings.LLM_PROVIDER}. Details: {e}"
