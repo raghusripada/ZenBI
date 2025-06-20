@@ -132,6 +132,10 @@ ZenBI is configured through environment variables defined in the `.env` file.
 ## Project Structure
 ... (This section remains the same) ...
 
+## Roadmap / Future Development
+
+For a detailed list of planned enhancements and future development ideas for ZenBI, please see the [ROADMAP.md](ROADMAP.md) file.
+
 ## Contributing
 ... (This section remains the same) ...
 ```
