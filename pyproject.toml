@@ -8,15 +8,19 @@ authors = ["Your Name <you@example.com>"]
 python = "^3.9"
 fastapi = "^0.104.1"
 uvicorn = {extras = ["standard"], version = "^0.23.2"}
-pydantic = "^2.4.2"
+pydantic = "^2.7.0" # Updated
+pydantic-settings = "^2.2.1" # Added
 PyYAML = "^6.0.1"
 sqlglot = {extras = ["rs"], version = "^18.5.0"}
-SQLAlchemy = "~1.4.46"
-langchain = "^0.0.339"
-langchain-openai = "^0.1.0"
-openai = "^1.3.7"
-openmetadata-ingestion = "^1.1.5"
-python-dotenv = "^1.0.0"
+SQLAlchemy = "^2.0.29" # Updated
+langchain = "^0.1.20" # Updated
+langchain-core = "^0.1.52" # Added/Updated
+langchain-openai = "^0.1.6" # Updated
+langchain-community = "^0.0.38" # Added/Updated
+openai = "^1.3.7" # Assuming this is still needed alongside langchain-openai for other direct uses, or can be removed if langchain-openai covers all needs. Keeping for now.
+python-dotenv = "^1.0.0" # Ensured present
+
+# openmetadata-ingestion = "^1.1.5" # Removed
 
 [build-system]
 requires = ["poetry-core>=1.0.0"]

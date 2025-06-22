@@ -2,6 +2,11 @@
 
 This document outlines potential future enhancements and a ToDo list to build ZenBI into a more comprehensive and user-friendly natural language powered BI tool with a robust semantic layer.
 
+**Note on OpenMetadata Integration:**
+The OpenMetadata integration features (including bootstrapping MDL from an OpenMetadata instance and other planned broader integrations) are temporarily deferred. This is due to current dependency incompatibilities between the `openmetadata-ingestion` package (which primarily supports Pydantic V1 and SQLAlchemy V1.x) and ZenBI's core dependencies like Langchain, Pydantic V2, and SQLAlchemy V2.x.
+
+We plan to revisit and re-integrate OpenMetadata functionality once its client libraries offer stable, long-term support for Pydantic V2 and SQLAlchemy V2.x, or when a more robust solution for managing these transitive dependency conflicts can be implemented for ZenBI. The items related to OpenMetadata below remain part of the long-term vision.
+
 ## I. Semantic Layer Engine Enhancements (ZenBI Core)
 
 ### MDL - Advanced Calculated Fields & Metrics

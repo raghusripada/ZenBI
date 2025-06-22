@@ -114,8 +114,9 @@ class DatabaseService:
         with self.engine.connect() as connection:
             try:
                 result = connection.execute(text(sql_query))
-                # Convert ResultProxy to list of dicts for SQLAlchemy 1.4.x
-                results_as_dicts = [dict(row) for row in result]
+                # For SQLAlchemy 2.0, mappings().all() returns a list of RowMapping objects
+                # which behave like dictionaries. Each row can be converted with _asdict().
+                results_as_dicts = [row._asdict() for row in result.mappings().all()]
                 # No explicit commit for SELECT, but if the query was DML/DDL it would be needed.
                 # connection.commit() # Not strictly needed for SELECTs on most backends with autocommit.
                 return results_as_dicts
